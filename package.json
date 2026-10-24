@@ -1,0 +1,10 @@
+{
+  "name": "p-p-launch-page",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "node build.mjs",
+    "deploy": "npm run build && npx wrangler deploy"
+  },
+  "engines": { "node": ">=22" }
+}

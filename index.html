@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f2f0e7"><title>p & p — a little closer, together</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='12' fill='%23d7e2cb'/%3E%3Ctext x='10' y='29' font-size='30' fill='%2328392f'%3Ep%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="assets/fonts.css"><link rel="stylesheet" href="styles.css"><link rel="stylesheet" href="responsive.css">
+</head>
+<body>
+  <main id="desktop" class="desktop">
+    <div class="wallpaper" aria-hidden="true"><img class="sage" src="assets/sage.svg" alt=""><img class="peach" src="assets/peach.svg" alt=""><img class="mist" src="assets/mist.svg" alt=""></div>
+    <header class="identity"><h1>p & p</h1><p>prudvee & priyadarshini</p></header>
+    <nav class="desktop-controls" aria-label="Desktop"><button id="add-note">+ Sticky note</button><button id="customize">Customize</button></nav>
+    <section class="search-area" aria-label="Web search"><p class="greeting">A little closer, together.</p><form id="search-form" class="glass search"><img src="assets/search.svg" width="22" height="22" alt=""><input id="search-input" aria-label="Search the web or open a link" placeholder="Search the web or open a link" required autocomplete="off"><button aria-label="Search" type="submit">↵</button></form></section>
+    <section class="countdown" aria-label="GATE countdown"><h2>GATE CS 2027</h2><div id="days">106</div><p>days to make a difference</p><button class="text-button" id="edit-date">Sample countdown · Edit date ↗</button></section>
+    <section id="notes" aria-label="Your movable sticky notes"></section>
+    <p class="notes-hint">Your notes, wherever you need them. Drag to rearrange.</p>
+    <section class="glass tasks" aria-labelledby="task-heading"><div class="section-heading"><h2 id="task-heading">Do next</h2><button id="task-history" class="icon-button" aria-label="Show completed tasks">···</button></div><div id="people" class="people" aria-label="Choose your workspace"><button data-person="Prudvee">Prudvee</button><button data-person="Priyadarshini">Priyadarshini</button></div><div id="task-list"></div><button id="add-task" class="wide">+ Add a task</button></section>
+    <section class="glass noticeboard" aria-labelledby="board-heading"><div class="section-heading"><h2 id="board-heading">Saved for us</h2><button id="add-pin">+ Pin anything</button></div><div class="board-toolbar"><div id="filters" role="group" aria-label="Filter resources"><button data-filter="all" class="active">All</button><button data-filter="video">Videos</button><button data-filter="image">Images</button><button data-filter="link">Links & files</button></div><span title="Local to this browser until shared storage is connected">Saved on this browser</span></div><div id="pins" class="pins"></div></section>
+    <section class="toolbox" aria-label="Your toolbox"><h2>YOUR TOOLBOX</h2><div id="dock" class="glass dock"></div><button id="add-shortcut" class="text-button">+ Add shortcut</button></section>
+    <section class="glass communication" aria-labelledby="chat-heading"><button id="message-history" class="chat-label"><h2 id="chat-heading">Between us</h2><span>Prudvee + Priyadarshini</span></button><button id="latest-message" class="latest-message" aria-label="Open message history"></button><form id="message-form"><input id="message-input" placeholder="Leave a message…" aria-label="Message" maxlength="2000" required><button class="primary" type="submit">Send ↗</button></form></section>
+  </main>
+  <dialog id="modal"><div class="modal-top"><h2 id="modal-title"></h2><button id="close-modal" class="icon-button" aria-label="Close dialog">×</button></div><div id="modal-body"></div></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script defer src="assets/supabase-2.57.4.js"></script>
+  <script defer src="app.bundle.js"></script>
+</body>
+</html>
