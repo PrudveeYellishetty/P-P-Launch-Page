@@ -11,7 +11,7 @@ const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_TfQH7fFqGDBFu-2ifapHXg_gjQsbv1e
 const PEOPLE = ['Prudvee', 'Priyadarshini'];
 const uid = () => crypto.randomUUID();
 const KEY = 'pp-desktop-v1';
-const defaults = () => ({version:1,person:'Prudvee',examDate:'',calm:false,motion:true,session:null,
+const defaults = () => ({version:1,person:'Prudvee',prepDeadlineVersion:1,examDate:'2027-02-01',calm:false,motion:true,session:null,
   notes:[{id:'note-1',owner:'Prudvee',title:'One problem.\nNo hints first.',body:'Explain the why, not just the code.',color:'yellow',x:365,y:294,width:236,height:185,rotation:-3,items:[]},{id:'note-2',owner:'Priyadarshini',title:'Before we log off',body:'',color:'peach',x:734,y:292,width:262,height:184,rotation:3,items:[{text:'Revise joins',done:false},{text:'Share one solution',done:false},{text:'Pick tomorrow’s task',done:false}]}],
   tasks:[{id:'task-1',owner:'Prudvee',title:'Two sliding-window problems',category:'DSA',minutes:45,url:'https://leetcode.com/problemset/',done:false},{id:'task-2',owner:'Prudvee',title:'Revise DBMS joins',category:'Core CS',minutes:30,url:'',done:false},{id:'task-3',owner:'Prudvee',title:'Apply to 2 roles',category:'Career',minutes:20,url:'',done:false},{id:'task-4',owner:'Priyadarshini',title:'Revise DBMS joins',category:'Core CS',minutes:30,url:'',done:false}],
   pins:[{id:'pin-1',title:'Binary search, visualized',kind:'video',owner:'Prudvee',url:'https://www.youtube.com/results?search_query=binary+search+visualized',sample:true},{id:'pin-2',title:'Project inspiration',kind:'image',owner:'Priyadarshini',url:'',data:'',sample:true},{id:'pin-3',title:'DBMS revision notes',kind:'link',owner:'Priyadarshini',url:'',body:'Links, files & ideas.\nKeep them here for later.',sample:true}],
@@ -35,7 +35,7 @@ function validate(s) {
   return s;
 }
 let startupError='';
-function load(){try{const raw=localStorage.getItem(KEY);return raw?validate(JSON.parse(raw)):defaults();}catch{startupError='Saved data could not be loaded. Your previous backup has not been overwritten.';return defaults();}}
+function load(){try{const raw=localStorage.getItem(KEY);const saved=raw?validate(JSON.parse(raw)):defaults();if(saved.prepDeadlineVersion!==1){saved.examDate='2027-02-01';saved.prepDeadlineVersion=1;if(saved._cloud){saved._cloud.queue=saved._cloud.queue.filter(op=>op.kind!=='settings');saved._cloud.queue.push({kind:'settings',id:'shared',content:{examDate:saved.examDate},deleted:false,operation:uid()});}}return saved;}catch{startupError='Saved data could not be loaded. Your previous backup has not been overwritten.';return defaults();}}
 let state=load();
 const getStartupError=()=>startupError;
 function saveState(next){validate(next);localStorage.setItem(KEY,JSON.stringify(next));state=next;window.dispatchEvent(new CustomEvent('pp:change'));}
@@ -117,7 +117,8 @@ $('#filters').onclick=e=>{const b=e.target.closest('[data-filter]');if(!b)return
 // The outbox lives in the same localStorage transaction as the edited content.
 const sharedKinds=['notes','tasks','pins','messages','shortcuts'];
 let cloudClient, syncBusy=false, syncTimer, cloudChannel, cloudStatus='Saved on this browser';
-let syncDebounce;
+let syncDebounce, signedInPerson='', signedInUser='', accountError='', authEpoch=0, authReady=false, connectingAccount=false;
+const GOOGLE_REDIRECT='https://p-p-launch-page.yprudveekumar946.workers.dev/';
 function scheduleCloudSync(){clearTimeout(syncDebounce);if(state._cloud)syncDebounce=setTimeout(syncCloud,700);}
 const cloudRows=s=>Object.fromEntries([...sharedKinds.flatMap(kind=>s[kind].map(content=>[kind+'/'+content.id,{kind,id:content.id,content}])),['settings/shared',{kind:'settings',id:'shared',content:{examDate:s.examDate}}]]);
 function queueCloudChanges(before,after){
@@ -134,10 +135,58 @@ function setCloudStatus(message){cloudStatus=message;const label=$('.board-toolb
 function cloudError(error){return error?.message||'Could not reach Supabase. Your edits are saved locally.';}
 async function getCloudClient(){
   if(!window.supabase)throw Error('Supabase client could not load. Refresh the page.');
-  cloudClient ||= window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false}});
-  let {data,error}=await cloudClient.auth.getSession();if(error)throw error;
-  if(!data.session){const signed=await cloudClient.auth.signInAnonymously();if(signed.error)throw signed.error;}
+  if(!cloudClient){
+    cloudClient=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:'pkce'}});
+    cloudClient.auth.onAuthStateChange((event,session)=>{
+      // Supabase callbacks must return before calling other auth/database methods.
+      if(event==='SIGNED_OUT')setTimeout(clearSignedInWorkspace,0);
+      else if(authReady&&['SIGNED_IN','USER_UPDATED'].includes(event)&&session?.user.id!==signedInUser)setTimeout(connectGoogleAccount,0);
+    });
+  }
   return cloudClient;
+}
+function messageAuthor(){return signedInPerson||state.person;}
+function renderAccount(){document.body.classList.toggle('workspace-locked',Boolean(state._cloud&&!signedInUser));const b=$('#account');if(b){b.textContent=signedInPerson||'Continue with Google';b.title=signedInPerson?'Manage your Google account':'Sign in to your shared workspace';}renderMessage();}
+function clearSignedInWorkspace(){
+  authEpoch++;signedInPerson='';signedInUser='';clearInterval(syncTimer);clearTimeout(syncDebounce);
+  if(cloudChannel){cloudClient.removeChannel(cloudChannel);cloudChannel=null;}
+  if(state._cloud){localStorage.removeItem('pp-before-cloud');saveState(defaults());}
+  setCloudStatus('Sign in to share');renderAccount();
+}
+async function googleSignIn(){
+  if(location.protocol==='file:')throw Error('Open the deployed website to sign in with Google.');
+  cloudSaveBackup();
+  const client=await getCloudClient();
+  const {error}=await client.auth.signInWithOAuth({provider:'google',options:{redirectTo:GOOGLE_REDIRECT,queryParams:{prompt:'select_account'}}});
+  if(error)throw error;
+}
+async function connectGoogleAccount(){
+  if(connectingAccount)return;
+  connectingAccount=true;
+  try{
+    const client=await getCloudClient();const session=await client.auth.getSession();if(session.error)throw session.error;
+    authReady=true;
+    const user=session.data.session?.user;
+    if(signedInUser&&user?.id!==signedInUser){
+      authEpoch++;signedInUser='';signedInPerson='';clearInterval(syncTimer);
+      if(cloudChannel){client.removeChannel(cloudChannel);cloudChannel=null;}
+      renderAccount();
+    }
+    if(!user||user.is_anonymous){setCloudStatus('Sign in with Google to share');renderAccount();return;}
+    if(user.id===signedInUser){await startCloud();return;}
+    const {data:member,error}=await client.rpc('pp_google_connect');if(error)throw error;
+    const sameWorkspace=state._cloud?.room===member.room;
+    const sameAccount=!state._cloud?.accountId||state._cloud.accountId===user.id;
+    cloudSaveBackup();
+    const existing=await client.from('pp_items').select('kind').eq('workspace_id',member.room).neq('kind','settings').limit(1);if(existing.error)throw existing.error;
+    // A returning account loads shared data. Only the first connection seeds local content.
+    const next=structuredClone(sameWorkspace&&!sameAccount?defaults():state);
+    const queue=sameWorkspace&&sameAccount?next._cloud.queue:existing.data.length?[]:Object.values(cloudRows(next)).map(row=>({...row,deleted:false,operation:uid()}));
+    next.person=member.person;next._cloud={room:member.room,accountId:user.id,queue};
+    signedInPerson=member.person;signedInUser=user.id;accountError='';authEpoch++;
+    saveState(next);renderAccount();await startCloud();
+  }catch(error){accountError=cloudError(error);setCloudStatus('Sign-in / setup needs attention');renderAccount();}
+  finally{connectingAccount=false;}
 }
 async function cloudRpc(name,args){const client=await getCloudClient();const result=await client.rpc(name,args);if(result.error)throw result.error;return result.data;}
 function cloudBackup(){const copy=structuredClone(state);delete copy._cloud;return copy;}
@@ -158,15 +207,16 @@ async function uploadCloudPin(op,room){
   content.data='';return content;
 }
 async function syncCloud(){
-  if(syncBusy||!state._cloud)return;
-  syncBusy=true;const room=state._cloud.room;
+  if(syncBusy||!state._cloud||!signedInUser||state._cloud.accountId!==signedInUser)return;
+  syncBusy=true;const room=state._cloud.room, epoch=authEpoch;
+  const checkAccount=()=>{if(epoch!==authEpoch)throw Error('Account changed. Sync stopped.');};
   try{
     await getCloudClient();setCloudStatus('Syncing…');
     // A snapshot prevents an active typing/dragging session from starving pulls.
     for(const op of structuredClone(state._cloud.queue)){
       const content=await uploadCloudPin(op,room);
       const {error}=await cloudClient.rpc('pp_apply_item',{room,operation_id:op.operation,item_kind:op.kind,item_id:op.id,item_content:content,is_deleted:op.deleted});
-      if(error)throw error;
+      if(error)throw error;checkAccount();
       const next=structuredClone(state);
       next._cloud.queue=next._cloud.queue.filter(item=>item.operation!==op.operation);
       if(content.filePath){const pin=next.pins.find(p=>p.id===op.id);if(pin)pin.filePath=content.filePath;}
@@ -185,7 +235,7 @@ async function syncCloud(){
       const {data,error}=await cloudClient.storage.from('pp-files').download(row.content.filePath);
       if(error)throw error;downloads.set(row.id,await blobData(data));
     }
-    const next=structuredClone(state), merged=new Map(rows.map(row=>[row.kind+'/'+row.id,row]));
+    checkAccount();const next=structuredClone(state), merged=new Map(rows.map(row=>[row.kind+'/'+row.id,row]));
     // Edits made while a request was running always remain visible and queued.
     for(const op of next._cloud.queue)merged.set(op.kind+'/'+op.id,op);
     for(const kind of sharedKinds)next[kind]=[...merged.values()].filter(r=>r.kind===kind&&!r.deleted).map(r=>{
@@ -194,66 +244,57 @@ async function syncCloud(){
       return content;
     });
     next.messages.sort((a,b)=>(a.time||'').localeCompare(b.time||''));
-    const settings=merged.get('settings/shared');if(settings&&!settings.deleted)next.examDate=settings.content.examDate;
+    const settings=merged.get('settings/shared');if(settings&&!settings.deleted)next.examDate=settings.content.examDate||'2027-02-01';
     saveState(next);setCloudStatus(next._cloud.queue.length?'Edits waiting to sync':'Shared · up to date');
   }catch(error){setCloudStatus('Offline / setup needed · edits saved');console.warn('p & p sync:',cloudError(error));}
   finally{syncBusy=false;}
 }
 async function startCloud(){
-  if(!state._cloud)return;
+  if(!state._cloud||!signedInUser)return;
   clearInterval(syncTimer);syncTimer=setInterval(syncCloud,15000);
   await syncCloud();
   if(cloudClient&&!cloudChannel){cloudChannel=cloudClient.channel('pp-'+state._cloud.room).on('postgres_changes',{event:'*',schema:'public',table:'pp_items',filter:'workspace_id=eq.'+state._cloud.room},()=>syncCloud()).subscribe();}
 }
 function cloudSettings(){
-  const content=el('div',{},el('p',{class:'help'},state._cloud?'Your two browsers share this workspace. Local appearance and the running study timer stay on each laptop.':'Run supabase-setup.sql in Supabase first, and enable anonymous sign-ins. Then create the workspace on one laptop; join it from the other.'));
-  const feedback=el('p',{class:'help',role:'status'});
+  const content=el('div',{},el('p',{class:'help'},signedInPerson?'One workspace, on every browser. Sign in with the same Google account to return to your notes, tasks and messages.':'A private workspace for Prudvee and Priyadarshini. Use your invited Google account to open it from any browser.'));
+  const feedback=el('p',{class:'help',role:'status'},accountError);
   const run=fn=>async e=>{const b=e.currentTarget;b.disabled=true;feedback.textContent='Connecting…';try{await fn();}catch(error){feedback.textContent=cloudError(error);}finally{b.disabled=false;}};
-  if(!state._cloud){
-    const person=el('select',{},...PEOPLE.map(name=>el('option',{value:name},name)));person.value=state.person;
-    const code=input('',{placeholder:'Paste the private pairing code',maxlength:64,autocomplete:'off'});
-    content.append(field('Your name (workspace creator)',person),button('Create our shared workspace',run(async()=>{
-      cloudSaveBackup();const room=await cloudRpc('pp_create_workspace',{person_name:person.value});
-      // Recovering the same session must not reseed an existing cloud workspace.
-      const existing=await cloudClient.from('pp_items').select('id').eq('workspace_id',room).limit(1);if(existing.error)throw existing.error;
-      const next=structuredClone(state);next.person=person.value;next._cloud={room,queue:existing.data.length?[]:Object.values(cloudRows(state)).map(row=>({...row,deleted:false,operation:uid()}))};saveState(next);
-      await startCloud();cloudSettings();
-    }),'primary'),field('Or join your friend’s workspace',code),button('Join with code',run(async()=>{
-      cloudSaveBackup();const room=await cloudRpc('pp_join_workspace',{pairing_code:code.value.trim()});
-      const member=await cloudClient.from('pp_members').select('person').eq('workspace_id',room).eq('user_id',(await cloudClient.auth.getUser()).data.user.id).single();if(member.error)throw member.error;
-      const next=structuredClone(state);next.person=member.data.person;next._cloud={room,queue:[]};saveState(next);await startCloud();cloudSettings();
-    })),el('p',{class:'help'},'Joining loads the shared desktop. A copy of this browser’s previous workspace is saved locally before pairing.'));
-  }else{
-    content.append(el('p',{class:'cloud-status'},cloudStatus),button('Sync now',run(async()=>{await syncCloud();feedback.textContent=cloudStatus;})),button('Make a pairing code for my friend',run(async()=>{
-      const code=await cloudRpc('pp_make_invite');const box=el('textarea',{readonly:true,rows:3,'aria-label':'Private pairing code'},code);feedback.replaceChildren('Send this code privately to your friend. It works once and expires in 24 hours.',box);box.select();
+  if(signedInPerson){
+    content.append(el('p',{},'Signed in as '+signedInPerson),el('p',{class:'cloud-status'},cloudStatus),button('Sync now',run(async()=>{await syncCloud();feedback.textContent=cloudStatus;})),button('Sign out',run(async()=>{
+      await syncCloud();
+      if(state._cloud?.queue.length)throw Error('Some edits are still waiting to sync. Reconnect and sync before signing out, or export a backup.');
+      const {error}=await cloudClient.auth.signOut({scope:'local'});if(error)throw error;clearSignedInWorkspace();close();toast('Signed out on this browser.');
     })));
+  }else{
+    content.append(button('Continue with Google',run(googleSignIn),'primary'),button('Retry connection',run(async()=>{await connectGoogleAccount();cloudSettings();})));
   }
-  content.append(button('Download pre-pairing backup',()=>{const data=localStorage.getItem('pp-before-cloud');if(data)download('p-and-p-before-cloud.json',data);else toast('No pre-pairing backup yet.');}),feedback,el('p',{class:'help'},'Keep using this browser and address. Clearing browser data loses its anonymous identity; reconnecting then needs a workspace administrator.'));
-  modal('Shared storage',content);
+  content.append(button('Download pre-sign-in backup',()=>{const data=localStorage.getItem('pp-before-cloud');if(data)download('p-and-p-before-sign-in.json',data);else toast('No pre-sign-in backup yet.');}),feedback);
+  modal('Your shared workspace',content);
 }
-window.addEventListener('online',()=>syncCloud());
-window.addEventListener('pp:change',()=>{setCloudStatus(state._cloud?(state._cloud.queue.length?'Edits waiting to sync':cloudStatus):'Saved on this browser');});
+window.addEventListener('online',()=>signedInUser?syncCloud():connectGoogleAccount());
+window.addEventListener('pp:change',()=>{setCloudStatus(signedInUser?(state._cloud?.queue.length?'Edits waiting to sync':cloudStatus):'Sign in to share');});
 
 
 // app.js
 function resize(){renderNotes();}
 window.addEventListener('resize',resize);
-function renderCountdown(){const date=state.examDate;if(!date){$('#days').textContent='106';$('#edit-date').textContent='Sample countdown · Edit date ↗';return;}const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());const days=Math.ceil((Date.parse(date+'T00:00:00+05:30')-Date.parse(today+'T00:00:00+05:30'))/86400000);$('#days').textContent=Math.max(0,days);$('#edit-date').textContent=(days<0?'Target passed · ':days===0?'Today · ':'')+new Date(date+'T12:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})+' · Edit ↗';}
-function editDate(){const date=input(state.examDate,{type:'date',required:true});const form=el('form',{},el('p',{class:'help'},'Choose your target date. The countdown uses India time. The design’s 106 days is a sample, not an official exam date.'),field('GATE target date',date),el('button',{type:'submit',class:'primary'},'Save date'));form.onsubmit=e=>{e.preventDefault();if(commit(()=>update(s=>s.examDate=date.value)))close();};modal('Your GATE countdown',form);}
+function renderCountdown(){const date=state.examDate||'2027-02-01';const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());const days=Math.ceil((Date.parse(date+'T00:00:00+05:30')-Date.parse(today+'T00:00:00+05:30'))/86400000);$('#days').textContent=Math.max(0,days);$('#edit-date').textContent=(days<0?'Target passed · ':days===0?'Today · ':'')+new Date(date+'T12:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})+' · Edit ↗';}
+function editDate(){const date=input(state.examDate,{type:'date',required:true});const form=el('form',{},el('p',{class:'help'},'Your preparation deadline is 1 February 2027. The countdown uses India time; this is your study target, not the official exam date.'),field('GATE target date',date),el('button',{type:'submit',class:'primary'},'Save date'));form.onsubmit=e=>{e.preventDefault();if(commit(()=>update(s=>s.examDate=date.value)))close();};modal('Your GATE countdown',form);}
 function renderDock(){const colors=['#eef1e6','#dde7d3','#f9e7a0','#f4ceb7'];$('#dock').replaceChildren(...state.shortcuts.map((a,i)=>{const icon=el('span',{class:'app-icon',style:'background:'+a.color},a.symbol);const link=el('a',{href:a.url,target:'_blank',rel:'noopener noreferrer'},icon,el('span',{},a.title));const del=button('×',()=>confirmAction('Remove shortcut?','Remove '+a.title+' from your toolbox?',()=>update(s=>s.shortcuts=s.shortcuts.filter(x=>x.id!==a.id))),'remove-shortcut');del.setAttribute('aria-label','Remove shortcut '+a.title);return el('div',{class:'shortcut'},link,del);}));}
 function addShortcut(){const title=input('',{required:true,maxlength:30});const url=input('',{type:'url',required:true,placeholder:'https://…'});const symbol=input('↗',{required:true,maxlength:8});const form=el('form',{},field('App name',title),field('URL',url),field('Symbol or initials',symbol),el('button',{class:'primary',type:'submit'},'Add shortcut'));form.onsubmit=e=>{e.preventDefault();if(!title.value.trim())return title.focus();if(!safeUrl(url.value))return toast('Use an https:// or http:// link.');if(commit(()=>update(s=>s.shortcuts.push({id:uid(),title:title.value.trim(),url:safeUrl(url.value),symbol:symbol.value,color:'#dde7d3'}))))close();};modal('Your toolbox',form);}
 const timeLabel=m=>m.sample?'11:02':new Date(m.time).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
-function renderMessage(){const m=state.messages.at(-1);$('#latest-message').replaceChildren(...(m?[el('small',{},m.owner+' · '+timeLabel(m)),el('p',{},m.text)]:[el('small',{},'A space for both of you'),el('p',{},'Leave the first message.')]));$('#message-input').setAttribute('aria-label','Message as '+state.person);}
+function renderMessage(){const m=state.messages.at(-1);$('#latest-message').replaceChildren(...(m?[el('small',{},m.owner+' · '+timeLabel(m)),el('p',{},m.text)]:[el('small',{},'A space for both of you'),el('p',{},'Leave the first message.')]));$('#message-input').setAttribute('aria-label','Message as '+messageAuthor());}
 function history(){modal('Between us',el('div',{},el('p',{class:'help'},'Message history. Export a copy whenever you want to keep a file.'),el('div',{class:'modal-buttons'},button('Export messages',()=>download('p-and-p-messages.json',JSON.stringify({version:1,messages:state.messages},null,2))),button('Import messages',importMessages)),...state.messages.slice().reverse().map(m=>el('article',{class:'message-item'},el('small',{},m.owner+' · '+timeLabel(m)+(m.sample?' · sample':'')),el('p',{},m.text)))));}
 function chooseJson(onRead){const picker=input('',{type:'file',accept:'.json,application/json'});picker.onchange=async()=>{const f=picker.files[0];if(!f)return;if(f.size>20000000)return toast('This file is too large. Use a backup under 20 MB.');try{await onRead(JSON.parse(await f.text()));}catch(e){toast(e.message||'That file could not be imported.');}};picker.click();}
 function importMessages(){chooseJson(data=>{if(data.version!==1||!Array.isArray(data.messages))throw Error('Choose an exported messages file.');const candidate=structuredClone(state);candidate.messages=data.messages;validate(candidate);const existing=new Set(state.messages.map(m=>m.id));const added=data.messages.filter(m=>!existing.has(m.id));if(commit(()=>update(s=>s.messages.push(...added)))){history();toast(added.length+' messages imported.');}});}
-function customize(){const calm=el('input',{type:'checkbox',checked:state.calm,onchange:e=>commit(()=>update(s=>s.calm=e.target.checked))});const motion=el('input',{type:'checkbox',checked:state.motion,onchange:e=>commit(()=>update(s=>s.motion=e.target.checked))});const content=el('div',{},el('p',{class:'help'},'Choose shared storage to pair your laptops. Appearance preferences stay on this browser.'),el('label',{style:'display:flex;gap:10px;margin:20px 0'},calm,'Softer background'),el('label',{style:'display:flex;gap:10px;margin:20px 0'},motion,'Gentle animations'),el('div',{class:'modal-buttons'},button('Shared storage',cloudSettings),button('Export everything',()=>download('p-and-p-backup.json',JSON.stringify(cloudBackup(),null,2))),button('Import backup',()=>chooseJson(data=>{validate(data);modal('Replace this workspace?',el('div',{},el('p',{class:'help'},'Importing replaces your current notes, tasks, pins, messages and shortcuts. Export your current workspace first if you want to keep it.'),el('div',{class:'form-actions'},button('Cancel',close),button('Import and replace',()=>{if(commit(()=>replace(data))){close();toast('Workspace imported.');}},'primary'))));})),button('Messages file',history)),el('p',{class:'help',style:'margin-top:20px'},'Set this page’s URL as your browser startup page. Keep using the same address: browser storage belongs to that address. Export a backup before changing browsers or clearing browsing data.'));modal('Make it yours',content);}
-$('#message-form').onsubmit=e=>{e.preventDefault();const text=$('#message-input').value.trim();if(!text)return;if(commit(()=>update(s=>s.messages.push({id:uid(),owner:s.person,text,time:new Date().toISOString(),sample:false})))){$('#message-input').value='';toast(state._cloud?'Message saved · syncing shortly.':'Message saved on this browser.');}};
+function customize(){const calm=el('input',{type:'checkbox',checked:state.calm,onchange:e=>commit(()=>update(s=>s.calm=e.target.checked))});const motion=el('input',{type:'checkbox',checked:state.motion,onchange:e=>commit(()=>update(s=>s.motion=e.target.checked))});const content=el('div',{},el('p',{class:'help'},'Sign in with Google to use the same workspace on every browser. Appearance preferences stay on this browser.'),el('label',{style:'display:flex;gap:10px;margin:20px 0'},calm,'Softer background'),el('label',{style:'display:flex;gap:10px;margin:20px 0'},motion,'Gentle animations'),el('div',{class:'modal-buttons'},button('Shared storage',cloudSettings),button('Export everything',()=>download('p-and-p-backup.json',JSON.stringify(cloudBackup(),null,2))),button('Import backup',()=>chooseJson(data=>{validate(data);modal('Replace this workspace?',el('div',{},el('p',{class:'help'},'Importing replaces your current notes, tasks, pins, messages and shortcuts. Export your current workspace first if you want to keep it.'),el('div',{class:'form-actions'},button('Cancel',close),button('Import and replace',()=>{if(commit(()=>replace(data))){close();toast('Workspace imported.');}},'primary'))));})),button('Messages file',history)),el('p',{class:'help',style:'margin-top:20px'},'Set this page’s URL as your browser startup page. Keep using the same address: browser storage belongs to that address. Export a backup before changing browsers or clearing browsing data.'));modal('Make it yours',content);}
+$('#message-form').onsubmit=e=>{e.preventDefault();const text=$('#message-input').value.trim();if(!text)return;if(commit(()=>update(s=>s.messages.push({id:uid(),owner:messageAuthor(),text,time:new Date().toISOString(),sample:false})))){$('#message-input').value='';toast(state._cloud?'Message saved · syncing shortly.':'Message saved on this browser.');}};
 $('#search-form').onsubmit=e=>{e.preventDefault();const q=$('#search-input').value.trim();if(!q)return;const direct=safeUrl(q)||(/^[\w.-]+\.[a-z]{2,}([/:?#].*)?$/i.test(q)?safeUrl('https://'+q):'');location.assign(direct||'https://www.google.com/search?q='+encodeURIComponent(q));};
 $('#add-note').onclick=()=>editNote();$('#add-task').onclick=()=>editTask();$('#add-pin').onclick=addPin;$('#edit-date').onclick=editDate;$('#add-shortcut').onclick=addShortcut;$('#customize').onclick=customize;$('#message-history').onclick=history;$('#latest-message').onclick=history;
-function render(){document.body.classList.toggle('calm',state.calm);document.body.classList.toggle('no-motion',!state.motion);renderCountdown();renderNotes();renderTasks();renderPins();renderDock();renderMessage();}
+function render(){document.body.classList.toggle('workspace-locked',Boolean(state._cloud&&!signedInUser));document.body.classList.toggle('calm',state.calm);document.body.classList.toggle('no-motion',!state.motion);renderCountdown();renderNotes();renderTasks();renderPins();renderDock();renderMessage();}
 window.addEventListener('pp:change',render);render();resize();setInterval(renderCountdown,60000);if(getStartupError())toast(getStartupError());
 
-startCloud();
+$('#account').onclick=cloudSettings;$('#unlock-workspace').onclick=cloudSettings;
+connectGoogleAccount();
 
 })();

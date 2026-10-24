@@ -10,9 +10,9 @@
   <main id="desktop" class="desktop">
     <div class="wallpaper" aria-hidden="true"><img class="sage" src="assets/sage.svg" alt=""><img class="peach" src="assets/peach.svg" alt=""><img class="mist" src="assets/mist.svg" alt=""></div>
     <header class="identity"><h1>p & p</h1><p>prudvee & priyadarshini</p></header>
-    <nav class="desktop-controls" aria-label="Desktop"><button id="add-note">+ Sticky note</button><button id="customize">Customize</button></nav>
+    <nav class="desktop-controls" aria-label="Desktop"><button id="add-note">+ Sticky note</button><button id="customize">Customize</button><button id="account">Continue with Google</button></nav>
     <section class="search-area" aria-label="Web search"><p class="greeting">A little closer, together.</p><form id="search-form" class="glass search"><img src="assets/search.svg" width="22" height="22" alt=""><input id="search-input" aria-label="Search the web or open a link" placeholder="Search the web or open a link" required autocomplete="off"><button aria-label="Search" type="submit">↵</button></form></section>
-    <section class="countdown" aria-label="GATE countdown"><h2>GATE CS 2027</h2><div id="days">106</div><p>days to make a difference</p><button class="text-button" id="edit-date">Sample countdown · Edit date ↗</button></section>
+    <section class="countdown" aria-label="GATE countdown"><h2>GATE CS 2027</h2><div id="days">—</div><p>days to finish preparation</p><button class="text-button" id="edit-date">1 Feb 2027 · Edit ↗</button></section>
     <section id="notes" aria-label="Your movable sticky notes"></section>
     <p class="notes-hint">Your notes, wherever you need them. Drag to rearrange.</p>
     <section class="glass tasks" aria-labelledby="task-heading"><div class="section-heading"><h2 id="task-heading">Do next</h2><button id="task-history" class="icon-button" aria-label="Show completed tasks">···</button></div><div id="people" class="people" aria-label="Choose your workspace"><button data-person="Prudvee">Prudvee</button><button data-person="Priyadarshini">Priyadarshini</button></div><div id="task-list"></div><button id="add-task" class="wide">+ Add a task</button></section>
@@ -20,6 +20,7 @@
     <section class="toolbox" aria-label="Your toolbox"><h2>YOUR TOOLBOX</h2><div id="dock" class="glass dock"></div><button id="add-shortcut" class="text-button">+ Add shortcut</button></section>
     <section class="glass communication" aria-labelledby="chat-heading"><button id="message-history" class="chat-label"><h2 id="chat-heading">Between us</h2><span>Prudvee + Priyadarshini</span></button><button id="latest-message" class="latest-message" aria-label="Open message history"></button><form id="message-form"><input id="message-input" placeholder="Leave a message…" aria-label="Message" maxlength="2000" required><button class="primary" type="submit">Send ↗</button></form></section>
   </main>
+  <section class="access-gate glass" aria-label="Sign in to your workspace"><h2>Your shared space</h2><p>Sign in with your invited Google account to open this workspace.</p><button id="unlock-workspace" class="primary">Sign in to continue</button></section>
   <dialog id="modal"><div class="modal-top"><h2 id="modal-title"></h2><button id="close-modal" class="icon-button" aria-label="Close dialog">×</button></div><div id="modal-body"></div></dialog>
   <div id="toast" role="status" aria-live="polite"></div>
   <script defer src="assets/supabase-2.57.4.js"></script>

@@ -20,18 +20,10 @@ The checked-in `wrangler.jsonc` points to `dist/`. No server code, database pass
 
 If choosing **Pages** instead: select framework **None**, build command `npm run build`, output directory `dist`, and root directory blank. Pages does not need a deploy command.
 
-## Use the permanent URL before pairing
+## Configure Google sign-in on the production URL
 
-1. Export your desktop from the local page via Customize → Export everything.
-2. Open the permanent production URL. Browser storage from the local file does not transfer automatically.
-3. Import the backup on the first browser, then create the shared workspace through Customize → Shared storage.
-4. Generate a private pairing code. The other person opens the same production URL and joins using that code.
-5. Test messages in both directions, a task update, and an uploaded image. Reload both browsers to confirm persistence.
+Follow [GOOGLE-SIGN-IN.md](GOOGLE-SIGN-IN.md). Export the old local desktop before moving to the hosted page. After OAuth, the database migration and the private allowlist are configured, both people sign in with Google on the same production URL. Returning browsers reconnect automatically; no pairing code is needed.
 
-Enable anonymous sign-ins in Supabase and run the current `supabase-setup.sql` before pairing. If you previously paired the local file, the hosted page has a different browser identity; do not assume it reconnects automatically. Keep the old page and backup until the hosted workspace is verified.
+Use the production URL as your browser startup page, not a preview URL. The OAuth callback returns to the configured production URL. Pushes to `main` redeploy through Cloudflare Git integration.
 
-Use the production URL, not a deployment preview URL, as your browser startup page. Pushes to `main` will redeploy once Git integration is connected.
-
-## Validation status
-
-Local rendering and mock two-browser sync were tested. Live Supabase permissions, realtime delivery and private uploads still require end-to-end verification against the configured project. The SQL setup was reported successful by the project owner.
+The code and migration are locally verified. Live Google consent/callback and live private uploads must be checked after provider setup.

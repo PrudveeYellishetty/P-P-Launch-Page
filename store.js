@@ -1,7 +1,7 @@
 export const PEOPLE = ['Prudvee', 'Priyadarshini'];
 export const uid = () => crypto.randomUUID();
 const KEY = 'pp-desktop-v1';
-export const defaults = () => ({version:1,person:'Prudvee',examDate:'',calm:false,motion:true,session:null,
+export const defaults = () => ({version:1,person:'Prudvee',prepDeadlineVersion:1,examDate:'2027-02-01',calm:false,motion:true,session:null,
   notes:[{id:'note-1',owner:'Prudvee',title:'One problem.\nNo hints first.',body:'Explain the why, not just the code.',color:'yellow',x:365,y:294,width:236,height:185,rotation:-3,items:[]},{id:'note-2',owner:'Priyadarshini',title:'Before we log off',body:'',color:'peach',x:734,y:292,width:262,height:184,rotation:3,items:[{text:'Revise joins',done:false},{text:'Share one solution',done:false},{text:'Pick tomorrow’s task',done:false}]}],
   tasks:[{id:'task-1',owner:'Prudvee',title:'Two sliding-window problems',category:'DSA',minutes:45,url:'https://leetcode.com/problemset/',done:false},{id:'task-2',owner:'Prudvee',title:'Revise DBMS joins',category:'Core CS',minutes:30,url:'',done:false},{id:'task-3',owner:'Prudvee',title:'Apply to 2 roles',category:'Career',minutes:20,url:'',done:false},{id:'task-4',owner:'Priyadarshini',title:'Revise DBMS joins',category:'Core CS',minutes:30,url:'',done:false}],
   pins:[{id:'pin-1',title:'Binary search, visualized',kind:'video',owner:'Prudvee',url:'https://www.youtube.com/results?search_query=binary+search+visualized',sample:true},{id:'pin-2',title:'Project inspiration',kind:'image',owner:'Priyadarshini',url:'',data:'',sample:true},{id:'pin-3',title:'DBMS revision notes',kind:'link',owner:'Priyadarshini',url:'',body:'Links, files & ideas.\nKeep them here for later.',sample:true}],
@@ -25,7 +25,7 @@ export function validate(s) {
   return s;
 }
 let startupError='';
-function load(){try{const raw=localStorage.getItem(KEY);return raw?validate(JSON.parse(raw)):defaults();}catch{startupError='Saved data could not be loaded. Your previous backup has not been overwritten.';return defaults();}}
+function load(){try{const raw=localStorage.getItem(KEY);const saved=raw?validate(JSON.parse(raw)):defaults();if(saved.prepDeadlineVersion!==1){saved.examDate='2027-02-01';saved.prepDeadlineVersion=1;if(saved._cloud){saved._cloud.queue=saved._cloud.queue.filter(op=>op.kind!=='settings');saved._cloud.queue.push({kind:'settings',id:'shared',content:{examDate:saved.examDate},deleted:false,operation:uid()});}}return saved;}catch{startupError='Saved data could not be loaded. Your previous backup has not been overwritten.';return defaults();}}
 export let state=load();
 export const getStartupError=()=>startupError;
 export function saveState(next){validate(next);localStorage.setItem(KEY,JSON.stringify(next));state=next;window.dispatchEvent(new CustomEvent('pp:change'));}

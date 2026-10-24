@@ -4,6 +4,7 @@ dist/
 .env
 .env.*
 *.log
+*.private.sql
 *-backup.json
 *-messages.json
 .DS_Store

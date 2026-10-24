@@ -59,3 +59,11 @@ body{overflow-x:clip}
  .toolbox{grid-row:3}.communication{grid-row:4;min-height:0;height:76px;padding:12px 16px}
  .communication input{height:46px}
 }
+.desktop-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;width:min(100%,280px)}
+.desktop-controls button{width:auto!important;min-width:0}
+#account{grid-column:1 / -1;font-size:12px;padding:8px 12px;min-height:32px}
+
+.access-gate{display:none;position:fixed;z-index:10;left:50%;top:50%;transform:translate(-50%,-50%);width:min(440px,calc(100vw - 40px));padding:28px;text-align:center}
+.access-gate p{margin:16px 0;line-height:1.6}.access-gate button{padding:12px 20px}
+.workspace-locked .access-gate{display:block}
+.workspace-locked .desktop > :not(.wallpaper):not(.identity):not(.desktop-controls),.workspace-locked #add-note,.workspace-locked #customize{visibility:hidden}

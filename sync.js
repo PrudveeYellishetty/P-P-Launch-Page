@@ -2,7 +2,8 @@
 // The outbox lives in the same localStorage transaction as the edited content.
 const sharedKinds=['notes','tasks','pins','messages','shortcuts'];
 let cloudClient, syncBusy=false, syncTimer, cloudChannel, cloudStatus='Saved on this browser';
-let syncDebounce;
+let syncDebounce, signedInPerson='', signedInUser='', accountError='', authEpoch=0, authReady=false, connectingAccount=false;
+const GOOGLE_REDIRECT='https://p-p-launch-page.yprudveekumar946.workers.dev/';
 function scheduleCloudSync(){clearTimeout(syncDebounce);if(state._cloud)syncDebounce=setTimeout(syncCloud,700);}
 const cloudRows=s=>Object.fromEntries([...sharedKinds.flatMap(kind=>s[kind].map(content=>[kind+'/'+content.id,{kind,id:content.id,content}])),['settings/shared',{kind:'settings',id:'shared',content:{examDate:s.examDate}}]]);
 function queueCloudChanges(before,after){
@@ -19,10 +20,58 @@ function setCloudStatus(message){cloudStatus=message;const label=$('.board-toolb
 function cloudError(error){return error?.message||'Could not reach Supabase. Your edits are saved locally.';}
 async function getCloudClient(){
   if(!window.supabase)throw Error('Supabase client could not load. Refresh the page.');
-  cloudClient ||= window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false}});
-  let {data,error}=await cloudClient.auth.getSession();if(error)throw error;
-  if(!data.session){const signed=await cloudClient.auth.signInAnonymously();if(signed.error)throw signed.error;}
+  if(!cloudClient){
+    cloudClient=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:'pkce'}});
+    cloudClient.auth.onAuthStateChange((event,session)=>{
+      // Supabase callbacks must return before calling other auth/database methods.
+      if(event==='SIGNED_OUT')setTimeout(clearSignedInWorkspace,0);
+      else if(authReady&&['SIGNED_IN','USER_UPDATED'].includes(event)&&session?.user.id!==signedInUser)setTimeout(connectGoogleAccount,0);
+    });
+  }
   return cloudClient;
+}
+function messageAuthor(){return signedInPerson||state.person;}
+function renderAccount(){document.body.classList.toggle('workspace-locked',Boolean(state._cloud&&!signedInUser));const b=$('#account');if(b){b.textContent=signedInPerson||'Continue with Google';b.title=signedInPerson?'Manage your Google account':'Sign in to your shared workspace';}renderMessage();}
+function clearSignedInWorkspace(){
+  authEpoch++;signedInPerson='';signedInUser='';clearInterval(syncTimer);clearTimeout(syncDebounce);
+  if(cloudChannel){cloudClient.removeChannel(cloudChannel);cloudChannel=null;}
+  if(state._cloud){localStorage.removeItem('pp-before-cloud');saveState(defaults());}
+  setCloudStatus('Sign in to share');renderAccount();
+}
+async function googleSignIn(){
+  if(location.protocol==='file:')throw Error('Open the deployed website to sign in with Google.');
+  cloudSaveBackup();
+  const client=await getCloudClient();
+  const {error}=await client.auth.signInWithOAuth({provider:'google',options:{redirectTo:GOOGLE_REDIRECT,queryParams:{prompt:'select_account'}}});
+  if(error)throw error;
+}
+async function connectGoogleAccount(){
+  if(connectingAccount)return;
+  connectingAccount=true;
+  try{
+    const client=await getCloudClient();const session=await client.auth.getSession();if(session.error)throw session.error;
+    authReady=true;
+    const user=session.data.session?.user;
+    if(signedInUser&&user?.id!==signedInUser){
+      authEpoch++;signedInUser='';signedInPerson='';clearInterval(syncTimer);
+      if(cloudChannel){client.removeChannel(cloudChannel);cloudChannel=null;}
+      renderAccount();
+    }
+    if(!user||user.is_anonymous){setCloudStatus('Sign in with Google to share');renderAccount();return;}
+    if(user.id===signedInUser){await startCloud();return;}
+    const {data:member,error}=await client.rpc('pp_google_connect');if(error)throw error;
+    const sameWorkspace=state._cloud?.room===member.room;
+    const sameAccount=!state._cloud?.accountId||state._cloud.accountId===user.id;
+    cloudSaveBackup();
+    const existing=await client.from('pp_items').select('kind').eq('workspace_id',member.room).neq('kind','settings').limit(1);if(existing.error)throw existing.error;
+    // A returning account loads shared data. Only the first connection seeds local content.
+    const next=structuredClone(sameWorkspace&&!sameAccount?defaults():state);
+    const queue=sameWorkspace&&sameAccount?next._cloud.queue:existing.data.length?[]:Object.values(cloudRows(next)).map(row=>({...row,deleted:false,operation:uid()}));
+    next.person=member.person;next._cloud={room:member.room,accountId:user.id,queue};
+    signedInPerson=member.person;signedInUser=user.id;accountError='';authEpoch++;
+    saveState(next);renderAccount();await startCloud();
+  }catch(error){accountError=cloudError(error);setCloudStatus('Sign-in / setup needs attention');renderAccount();}
+  finally{connectingAccount=false;}
 }
 async function cloudRpc(name,args){const client=await getCloudClient();const result=await client.rpc(name,args);if(result.error)throw result.error;return result.data;}
 function cloudBackup(){const copy=structuredClone(state);delete copy._cloud;return copy;}
@@ -43,15 +92,16 @@ async function uploadCloudPin(op,room){
   content.data='';return content;
 }
 async function syncCloud(){
-  if(syncBusy||!state._cloud)return;
-  syncBusy=true;const room=state._cloud.room;
+  if(syncBusy||!state._cloud||!signedInUser||state._cloud.accountId!==signedInUser)return;
+  syncBusy=true;const room=state._cloud.room, epoch=authEpoch;
+  const checkAccount=()=>{if(epoch!==authEpoch)throw Error('Account changed. Sync stopped.');};
   try{
     await getCloudClient();setCloudStatus('Syncing…');
     // A snapshot prevents an active typing/dragging session from starving pulls.
     for(const op of structuredClone(state._cloud.queue)){
       const content=await uploadCloudPin(op,room);
       const {error}=await cloudClient.rpc('pp_apply_item',{room,operation_id:op.operation,item_kind:op.kind,item_id:op.id,item_content:content,is_deleted:op.deleted});
-      if(error)throw error;
+      if(error)throw error;checkAccount();
       const next=structuredClone(state);
       next._cloud.queue=next._cloud.queue.filter(item=>item.operation!==op.operation);
       if(content.filePath){const pin=next.pins.find(p=>p.id===op.id);if(pin)pin.filePath=content.filePath;}
@@ -70,7 +120,7 @@ async function syncCloud(){
       const {data,error}=await cloudClient.storage.from('pp-files').download(row.content.filePath);
       if(error)throw error;downloads.set(row.id,await blobData(data));
     }
-    const next=structuredClone(state), merged=new Map(rows.map(row=>[row.kind+'/'+row.id,row]));
+    checkAccount();const next=structuredClone(state), merged=new Map(rows.map(row=>[row.kind+'/'+row.id,row]));
     // Edits made while a request was running always remain visible and queued.
     for(const op of next._cloud.queue)merged.set(op.kind+'/'+op.id,op);
     for(const kind of sharedKinds)next[kind]=[...merged.values()].filter(r=>r.kind===kind&&!r.deleted).map(r=>{
@@ -79,42 +129,32 @@ async function syncCloud(){
       return content;
     });
     next.messages.sort((a,b)=>(a.time||'').localeCompare(b.time||''));
-    const settings=merged.get('settings/shared');if(settings&&!settings.deleted)next.examDate=settings.content.examDate;
+    const settings=merged.get('settings/shared');if(settings&&!settings.deleted)next.examDate=settings.content.examDate||'2027-02-01';
     saveState(next);setCloudStatus(next._cloud.queue.length?'Edits waiting to sync':'Shared · up to date');
   }catch(error){setCloudStatus('Offline / setup needed · edits saved');console.warn('p & p sync:',cloudError(error));}
   finally{syncBusy=false;}
 }
 async function startCloud(){
-  if(!state._cloud)return;
+  if(!state._cloud||!signedInUser)return;
   clearInterval(syncTimer);syncTimer=setInterval(syncCloud,15000);
   await syncCloud();
   if(cloudClient&&!cloudChannel){cloudChannel=cloudClient.channel('pp-'+state._cloud.room).on('postgres_changes',{event:'*',schema:'public',table:'pp_items',filter:'workspace_id=eq.'+state._cloud.room},()=>syncCloud()).subscribe();}
 }
 function cloudSettings(){
-  const content=el('div',{},el('p',{class:'help'},state._cloud?'Your two browsers share this workspace. Local appearance and the running study timer stay on each laptop.':'Run supabase-setup.sql in Supabase first, and enable anonymous sign-ins. Then create the workspace on one laptop; join it from the other.'));
-  const feedback=el('p',{class:'help',role:'status'});
+  const content=el('div',{},el('p',{class:'help'},signedInPerson?'One workspace, on every browser. Sign in with the same Google account to return to your notes, tasks and messages.':'A private workspace for Prudvee and Priyadarshini. Use your invited Google account to open it from any browser.'));
+  const feedback=el('p',{class:'help',role:'status'},accountError);
   const run=fn=>async e=>{const b=e.currentTarget;b.disabled=true;feedback.textContent='Connecting…';try{await fn();}catch(error){feedback.textContent=cloudError(error);}finally{b.disabled=false;}};
-  if(!state._cloud){
-    const person=el('select',{},...PEOPLE.map(name=>el('option',{value:name},name)));person.value=state.person;
-    const code=input('',{placeholder:'Paste the private pairing code',maxlength:64,autocomplete:'off'});
-    content.append(field('Your name (workspace creator)',person),button('Create our shared workspace',run(async()=>{
-      cloudSaveBackup();const room=await cloudRpc('pp_create_workspace',{person_name:person.value});
-      // Recovering the same session must not reseed an existing cloud workspace.
-      const existing=await cloudClient.from('pp_items').select('id').eq('workspace_id',room).limit(1);if(existing.error)throw existing.error;
-      const next=structuredClone(state);next.person=person.value;next._cloud={room,queue:existing.data.length?[]:Object.values(cloudRows(state)).map(row=>({...row,deleted:false,operation:uid()}))};saveState(next);
-      await startCloud();cloudSettings();
-    }),'primary'),field('Or join your friend’s workspace',code),button('Join with code',run(async()=>{
-      cloudSaveBackup();const room=await cloudRpc('pp_join_workspace',{pairing_code:code.value.trim()});
-      const member=await cloudClient.from('pp_members').select('person').eq('workspace_id',room).eq('user_id',(await cloudClient.auth.getUser()).data.user.id).single();if(member.error)throw member.error;
-      const next=structuredClone(state);next.person=member.data.person;next._cloud={room,queue:[]};saveState(next);await startCloud();cloudSettings();
-    })),el('p',{class:'help'},'Joining loads the shared desktop. A copy of this browser’s previous workspace is saved locally before pairing.'));
-  }else{
-    content.append(el('p',{class:'cloud-status'},cloudStatus),button('Sync now',run(async()=>{await syncCloud();feedback.textContent=cloudStatus;})),button('Make a pairing code for my friend',run(async()=>{
-      const code=await cloudRpc('pp_make_invite');const box=el('textarea',{readonly:true,rows:3,'aria-label':'Private pairing code'},code);feedback.replaceChildren('Send this code privately to your friend. It works once and expires in 24 hours.',box);box.select();
+  if(signedInPerson){
+    content.append(el('p',{},'Signed in as '+signedInPerson),el('p',{class:'cloud-status'},cloudStatus),button('Sync now',run(async()=>{await syncCloud();feedback.textContent=cloudStatus;})),button('Sign out',run(async()=>{
+      await syncCloud();
+      if(state._cloud?.queue.length)throw Error('Some edits are still waiting to sync. Reconnect and sync before signing out, or export a backup.');
+      const {error}=await cloudClient.auth.signOut({scope:'local'});if(error)throw error;clearSignedInWorkspace();close();toast('Signed out on this browser.');
     })));
+  }else{
+    content.append(button('Continue with Google',run(googleSignIn),'primary'),button('Retry connection',run(async()=>{await connectGoogleAccount();cloudSettings();})));
   }
-  content.append(button('Download pre-pairing backup',()=>{const data=localStorage.getItem('pp-before-cloud');if(data)download('p-and-p-before-cloud.json',data);else toast('No pre-pairing backup yet.');}),feedback,el('p',{class:'help'},'Keep using this browser and address. Clearing browser data loses its anonymous identity; reconnecting then needs a workspace administrator.'));
-  modal('Shared storage',content);
+  content.append(button('Download pre-sign-in backup',()=>{const data=localStorage.getItem('pp-before-cloud');if(data)download('p-and-p-before-sign-in.json',data);else toast('No pre-sign-in backup yet.');}),feedback);
+  modal('Your shared workspace',content);
 }
-window.addEventListener('online',()=>syncCloud());
-window.addEventListener('pp:change',()=>{setCloudStatus(state._cloud?(state._cloud.queue.length?'Edits waiting to sync':cloudStatus):'Saved on this browser');});
+window.addEventListener('online',()=>signedInUser?syncCloud():connectGoogleAccount());
+window.addEventListener('pp:change',()=>{setCloudStatus(signedInUser?(state._cloud?.queue.length?'Edits waiting to sync':cloudStatus):'Sign in to share');});
